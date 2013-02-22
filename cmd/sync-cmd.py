@@ -181,7 +181,7 @@ def main():
     host = port = None
     if len(sys.argv) == 4:
         host_port = sys.argv[3].split(':')
-        host, port = host_port[0], host_port[1]
+        host, port = host_port[0], int(host_port[1])
 
     global packList
     packList = git.PackIdxList(os.path.join(bup_repo, "objects/pack"))
@@ -193,7 +193,7 @@ def main():
     reactor.listenTCP(server_port, serverFactory)
 
     if host and port:
-        print "starting client"
+        print "starting client, connecting to %s:%s" % (host, port)
         clientFactory = ContentClientFactory()
         reactor.connectTCP(host, port, clientFactory)
 
