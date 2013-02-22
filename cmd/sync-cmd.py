@@ -12,7 +12,7 @@ MAX_FRAME_SIZE = 40000
 
 class ContentServerProtocol(Int32StringReceiver):
 
-    def __init__(self, bup_repo):
+    def __init__(self, bup_repo, push, pull):
         git.check_repo_or_die(bup_repo)
         self.packList = git.PackIdxList(os.path.join(bup_repo, "objects/pack"))
         self.packList.refresh()
@@ -24,13 +24,27 @@ class ContentServerProtocol(Int32StringReceiver):
         self.beginning = time.time()
         self.cp = git.CatPipe()
 
+        # A boolean indicating if a content server should push requested
+        # objects
+        self.push = push
+
+        # A boolean indication if a content server should pull missing
+        # objects
+        self.pull = pull
+
     def connectionMade(self):
-        allrefs = []
-        for (refname, sha) in git.list_refs():
-            allrefs.append(refname + ' ' + sha)
-        message = 'REFS\n' + '\n'.join(allrefs)
-        message = struct.pack("!I", len(message)) + message + '\0'
-        self.sendString(message)
+        if self.push:
+            # Upon receiving a connection, send the refs
+
+            log("Received a connection, starting push\n")
+            allrefs = []
+            for (refname, sha) in git.list_refs():
+                allrefs.append(refname + ' ' + sha)
+            message = 'REFS\n' + '\n'.join(allrefs)
+            message = struct.pack("!I", len(message)) + message + '\0'
+            self.sendString(message)
+        else:
+            log("Received a connection, not pushing\n")
 
     def stringReceived(self, data):
         self._process_data(data)
@@ -53,12 +67,12 @@ class ContentServerProtocol(Int32StringReceiver):
                 if type == 'commit':
                     # firstline of the commit message contains the tree
                     tree_sha = content.split('\n')[0].split(' ')[1].decode('hex')
-                    if not self.packList.exists(tree_sha):
+                    if not self.packList.exists(tree_sha) and self.pull:
                         self.local_missing.append(tree_sha)
                 elif type == 'tree':
                     # each line contains an object
                     for (mode, name, hash) in git.tree_decode(content):
-                        if not self.packList.exists(hash):
+                        if not self.packList.exists(hash) and self.pull:
                             self.local_missing.append(hash)
 
                 elif type == 'blob':
@@ -69,7 +83,8 @@ class ContentServerProtocol(Int32StringReceiver):
                     print "wrong type:", type
 
             elif cmd == 'WANT':
-                self.remote_missing.append(message)
+                if self.push:
+                    self.remote_missing.append(message)
 
 
     def _prepare_next_messages(self):
@@ -145,21 +160,15 @@ class ContentServerProtocol(Int32StringReceiver):
 
             start = end+1
 
-class ContentServerNotSendingProtocol(ContentServerProtocol):
-    def connectionMade(self):
-        print "connection"
-
 class ContentServerFactory(ClientFactory):
 
-    def __init__(self, bup_repo, send=True):
+    def __init__(self, bup_repo, push=False, pull=False):
         self.bup_repo = bup_repo
-        self.send = send
+        self.push = push
+        self.pull = pull
 
     def buildProtocol(self, addr):
-        if self.send:
-            p = ContentServerProtocol(self.bup_repo)
-        else:
-            p = ContentServerNotSendingProtocol(self.bup_repo)
+        p = ContentServerProtocol(self.bup_repo, self.push, self.pull)
         p.factory = self
         return p
 
@@ -175,7 +184,8 @@ def main():
     optspec = """
 bup sync [--remote_host host] [--remote_port remote_port] --port port --repo repo
 --
-send    send commits that are not available
+push    push commits that are not available remotely
+pull    pull commits that are not available locally
 remote_host=    hostname to connect to
 remote_port=    port to connect to
 repo=   repo to use locally
@@ -187,16 +197,13 @@ port=   port to listen to
     if not (opt.repo or opt.port):
         o.fatal("You must give a repo and a local port")
 
-    serverFactory = ContentServerFactory(opt.repo, opt.send)
-    serverFactory.protocol = ContentServerNotSendingProtocol
+    serverFactory = ContentServerFactory(opt.repo, opt.push, opt.pull)
     reactor.listenTCP(opt.port, serverFactory)
 
     if opt.remote_host and opt.remote_port:
         reactor.connectTCP(opt.remote_host, opt.remote_port, serverFactory)
 
     reactor.run()
-
-    log("ready to go\n")
 
 if __name__ == '__main__':
     main()
