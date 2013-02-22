@@ -178,10 +178,10 @@ def main():
 
     bup_repo = sys.argv[1]
     server_port = int(sys.argv[2])
+    host = port = None
     if len(sys.argv) == 4:
-        client_connects_to = int(sys.argv[3])
-    else:
-        client_connects_to = None
+        host_port = sys.argv[3].split(':')
+        host, port = host_port[0], host_port[1]
 
     global packList
     packList = git.PackIdxList(os.path.join(bup_repo, "objects/pack"))
@@ -192,10 +192,10 @@ def main():
     serverFactory.protocol = ContentServerNotSendingProtocol
     reactor.listenTCP(server_port, serverFactory)
 
-    if client_connects_to:
+    if host and port:
         print "starting client"
         clientFactory = ContentClientFactory()
-        reactor.connectTCP('localhost', client_connects_to, clientFactory)
+        reactor.connectTCP(host, port, clientFactory)
 
     reactor.run()
 
