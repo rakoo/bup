@@ -8,7 +8,7 @@ from twisted.internet import reactor
 
 from collections import deque
 
-MAX_FRAME_SIZE = 1300
+MAX_FRAME_SIZE = 40000
 
 _cp = None
 def cp():
