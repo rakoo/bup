@@ -138,16 +138,7 @@ def process_data(data):
         elif cmd == 'WANT':
             remote_missing.append(message)
 
-class ContentServer(Int32StringReceiver):
-
-    def stringReceived(self, data):
-        process_data(data)
-        for next_messages in prepare_next_messages():
-            if len(next_messages) > 0:
-                tosend = ''.join(next_messages)
-                self.sendString(tosend)
-
-class ContentClient(Int32StringReceiver):
+class ContentServerProtocol(Int32StringReceiver):
 
     def connectionMade(self):
         allrefs = []
@@ -165,8 +156,12 @@ class ContentClient(Int32StringReceiver):
                 self.sendString(tosend)
 
 
+class ContentServerNotSendingProtocol(ContentServerProtocol):
+    def connectionMade(self):
+        print "connection"
+
 class ContentClientFactory(ClientFactory):
-    protocol = ContentClient
+    protocol = ContentServerProtocol
 
     def clientConnectionFailed(self, connector, reason):
         print 'connection failed:', reason.getErrorMessage()
@@ -190,7 +185,7 @@ def main():
 
     git.check_repo_or_die(bup_repo)
     serverFactory = Factory()
-    serverFactory.protocol = ContentServer
+    serverFactory.protocol = ContentServerNotSendingProtocol
     reactor.listenTCP(server_port, serverFactory)
 
     if client_connects_to:
