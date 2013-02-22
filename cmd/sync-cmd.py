@@ -1,5 +1,5 @@
 import re, struct, errno, time, zlib, sys, time
-from bup import git, ssh
+from bup import git, ssh, options
 from bup.helpers import *
 
 from twisted.internet.protocol import Protocol, ClientFactory, Factory
@@ -9,9 +9,6 @@ from twisted.internet import reactor
 from collections import deque
 
 MAX_FRAME_SIZE = 40000
-
-
-
 
 class ContentServerProtocol(Int32StringReceiver):
 
@@ -154,11 +151,15 @@ class ContentServerNotSendingProtocol(ContentServerProtocol):
 
 class ContentServerFactory(ClientFactory):
 
-    def __init__(self, bup_repo):
+    def __init__(self, bup_repo, send=True):
         self.bup_repo = bup_repo
+        self.send = send
 
     def buildProtocol(self, addr):
-        p = ContentServerProtocol(self.bup_repo)
+        if self.send:
+            p = ContentServerProtocol(self.bup_repo)
+        else:
+            p = ContentServerNotSendingProtocol(self.bup_repo)
         p.factory = self
         return p
 
@@ -171,23 +172,31 @@ class ContentServerFactory(ClientFactory):
 
 def main():
 
-    bup_repo = sys.argv[1]
-    server_port = int(sys.argv[2])
-    host = port = None
-    if len(sys.argv) == 4:
-        host_port = sys.argv[3].split(':')
-        host, port = host_port[0], int(host_port[1])
+    optspec = """
+bup sync [--remote_host host] [--remote_port remote_port] --port port --repo repo
+--
+send    send commits that are not available
+remote_host=    hostname to connect to
+remote_port=    port to connect to
+repo=   repo to use locally
+port=   port to listen to
+"""
+    o = options.Options(optspec)
+    (opt, flags, extra) = o.parse(sys.argv[1:])
 
-    serverFactory = ContentServerFactory(bup_repo)
+    if not (opt.repo or opt.port):
+        o.fatal("You must give a repo and a local port")
+
+    serverFactory = ContentServerFactory(opt.repo, opt.send)
     serverFactory.protocol = ContentServerNotSendingProtocol
-    reactor.listenTCP(server_port, serverFactory)
+    reactor.listenTCP(opt.port, serverFactory)
 
-    if host and port:
-        print "starting client, connecting to %s:%s" % (host, port)
-        clientFactory = ContentServerFactory(bup_repo)
-        reactor.connectTCP(host, port, clientFactory)
+    if opt.remote_host and opt.remote_port:
+        reactor.connectTCP(opt.remote_host, opt.remote_port, serverFactory)
 
     reactor.run()
+
+    log("ready to go\n")
 
 if __name__ == '__main__':
     main()
