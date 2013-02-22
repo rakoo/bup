@@ -8,7 +8,7 @@ from twisted.internet import reactor
 
 from collections import deque
 
-MAX_FRAME_SIZE = 40000
+MAX_FRAME_SIZE = 1300
 
 _cp = None
 def cp():
@@ -82,7 +82,11 @@ def prepare_next_messages():
         total_size_exchanged += total_size
         duration = time.time() - beginning
         speed = total_size_exchanged / (duration) / 1024
-        qprogress("%s kbps\n" % str(speed))
+        qprogress("%s kbps\r" % str(speed))
+
+        #qprogress("%s messages, %s local_missing remaining and %s remote_missing remaining\n" % (len(next_messages),
+                                                 #len(local_missing),
+                                                 #len(remote_missing)))
 
         yield next_messages
 
