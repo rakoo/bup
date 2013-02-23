@@ -210,6 +210,7 @@ port=   port to listen to
     if opt.remote_host and opt.remote_port:
         reactor.connectTCP(opt.remote_host, opt.remote_port, serverFactory)
 
+    log("Starting reactor...\n")
     reactor.run()
 
 if __name__ == '__main__':
