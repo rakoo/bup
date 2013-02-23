@@ -20,7 +20,8 @@ class ContentServerProtocol(Int32StringReceiver):
         self.local_missing = deque()
         self.remote_missing = deque()
 
-        self.total_size_exchanged = 0
+        self.total_size_sent = 0
+        self.total_size_received = 0
         self.beginning = time.time()
         self.cp = git.CatPipe()
 
@@ -28,7 +29,7 @@ class ContentServerProtocol(Int32StringReceiver):
         # objects
         self.push = push
 
-        # A boolean indication if a content server should pull missing
+        # A boolean indicating if a content server should pull missing
         # objects
         self.pull = pull
 
@@ -125,9 +126,9 @@ class ContentServerProtocol(Int32StringReceiver):
                 else:
                     break
 
-            self.total_size_exchanged += total_size
+            self.total_size_sent += total_size
             duration = time.time() - self.beginning
-            speed = self.total_size_exchanged / (duration) / 1024
+            speed = self.total_size_sent / (duration) / 1024
             qprogress("%s kbps\r" % str(speed))
 
 
@@ -152,6 +153,7 @@ class ContentServerProtocol(Int32StringReceiver):
 
     def _decode(self, buf):
         """yield each framed message in the raw datagram received"""
+        self.total_size_received += len(buf)
         start = 0
         while start < len(buf):
             length = struct.unpack("!I", buf[start:start+4])[0]
