@@ -55,24 +55,29 @@ class ContentServerProtocol(Int32StringReceiver):
 
     def _process_data(self, data):
         for cmd, message in self._decode(data):
-
             if cmd == 'REFS':
+                if not self.pull:
+                    continue
+
                 missing = self._treat_refs(message)
                 print "missing %s commits" % len(missing)
 
                 self.local_missing.extend(missing)
 
             elif cmd == 'HAVE':
+                if not self.pull:
+                    continue
+
                 hash, type, content = self._decode_have(message)
                 if type == 'commit':
                     # firstline of the commit message contains the tree
                     tree_sha = content.split('\n')[0].split(' ')[1].decode('hex')
-                    if not self.packList.exists(tree_sha) and self.pull:
+                    if not self.packList.exists(tree_sha):
                         self.local_missing.append(tree_sha)
                 elif type == 'tree':
                     # each line contains an object
                     for (mode, name, hash) in git.tree_decode(content):
-                        if not self.packList.exists(hash) and self.pull:
+                        if not self.packList.exists(hash):
                             self.local_missing.append(hash)
 
                 elif type == 'blob':
