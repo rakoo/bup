@@ -24,6 +24,7 @@ class ContentServerProtocol(Int32StringReceiver):
         self.total_size_received = 0
         self.beginning = time.time()
         self.cp = git.CatPipe()
+        self.total_received = 0
 
         # A boolean indicating if a content server should push requested
         # objects
