@@ -67,7 +67,10 @@ class ContentServerProtocol(Int32StringReceiver):
                 missing = self._treat_refs(message)
                 print "missing %s commits" % len(missing)
 
-                self.local_missing.extend(missing)
+                if len(missing) == 0:
+                    self._end()
+                else:
+                    self.local_missing.extend(missing)
 
             elif cmd == 'HAVE':
                 if not self.pull:
@@ -100,6 +103,16 @@ class ContentServerProtocol(Int32StringReceiver):
 
     def _prepare_next_messages(self):
 
+        if len(self.local_missing) == 0 and len(self.remote_missing) == 0: # transfer is over
+            self.packList.refresh()
+            allrefs = []
+            for (refname, sha) in git.list_refs():
+                allrefs.append(refname + ' ' + sha)
+            message = 'REFS\n' + '\n'.join(allrefs)
+            message = struct.pack("!I", len(message)) + message + '\0'
+
+            yield [message]
+            
         while len(self.local_missing) > 0 or len(self.remote_missing) > 0:
             next_messages = []
             total_size = 0
@@ -171,6 +184,9 @@ class ContentServerProtocol(Int32StringReceiver):
             yield cmd, message
 
             start = end+1
+
+    def _end(self):
+        log("transfer done\n")
 
 class ContentServerFactory(ClientFactory):
 
