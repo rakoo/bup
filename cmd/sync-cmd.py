@@ -13,6 +13,7 @@ MAX_FRAME_SIZE = 40000
 class ContentServerProtocol(Int32StringReceiver):
 
     def __init__(self, bup_repo, push, pull):
+        self.MAX_LENGTH = 300000 # some chunks are very large
         git.check_repo_or_die(bup_repo)
         self.packList = git.PackIdxList(os.path.join(bup_repo, "objects/pack"))
         self.packList.refresh()
