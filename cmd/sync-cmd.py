@@ -35,6 +35,8 @@ class ContentServerProtocol(Int32StringReceiver):
         # objects
         self.pull = pull
 
+        self.w = git.PackWriter(objcache_maker = lambda : self.packList)
+
     def connectionMade(self):
         if self.push:
             # Upon receiving a connection, send the refs
@@ -72,6 +74,10 @@ class ContentServerProtocol(Int32StringReceiver):
                     continue
 
                 hash, type, content = self._decode_have(message)
+
+                assert type in ('blob', 'tree', 'commit')
+                #self.w.maybe_write(type, content)
+
                 if type == 'commit':
                     # firstline of the commit message contains the tree
                     tree_sha = content.split('\n')[0].split(' ')[1].decode('hex')
@@ -86,9 +92,6 @@ class ContentServerProtocol(Int32StringReceiver):
                 elif type == 'blob':
                     pass
                     #print "blob"
-
-                else:
-                    print "wrong type:", type
 
             elif cmd == 'WANT':
                 if self.push:
