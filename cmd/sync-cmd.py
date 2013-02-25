@@ -209,7 +209,6 @@ class ContentServerProtocol(Int32StringReceiver):
 
     def _end(self):
         assert len(self.new_hashes) == 0
-        self.transport.loseConnection()
         self.transfer_done = True
         log("writing tmp pack to repo...\n")
         self.w.close(run_midx=False)
