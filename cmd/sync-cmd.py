@@ -12,11 +12,8 @@ MAX_FRAME_SIZE = 40000
 
 class ContentServerProtocol(Int32StringReceiver):
 
-    def __init__(self, bup_repo, push, pull):
+    def __init__(self, push, pull):
         self.MAX_LENGTH = 300000 # some chunks are very large
-        git.check_repo_or_die(bup_repo)
-        self.packList = git.PackIdxList(os.path.join(bup_repo, "objects/pack"))
-        self.packList.refresh()
 
         self.local_missing = deque()
         self.remote_missing = deque()
@@ -35,7 +32,9 @@ class ContentServerProtocol(Int32StringReceiver):
         # objects
         self.pull = pull
 
-        self.w = git.PackWriter(objcache_maker = lambda : self.packList)
+        global packList
+        self.w = git.PackWriter(objcache_maker = lambda : packList)
+
 
     def connectionMade(self):
         if self.push:
@@ -153,10 +152,12 @@ class ContentServerProtocol(Int32StringReceiver):
             yield next_messages
 
     def _treat_refs(self, data):
+        global packList
+
         missing = []
         for line in data.split('\n'):
             (name, sha) = line.split(' ')
-            if not self.packList.exists(sha):
+            if not packList.exists(sha):
                 missing.append(sha)
         return missing
 
@@ -186,17 +187,21 @@ class ContentServerProtocol(Int32StringReceiver):
             start = end+1
 
     def _end(self):
-        log("transfer done\n")
+        assert len(self.new_hashes) == 0
+        self.transport.loseConnection()
+        self.transfer_done = True
+        log("writing tmp pack to repo...\n")
+        self.w.close(run_midx=False)
+        log("wrote to repo, have a nice day!\n")
 
 class ContentServerFactory(ClientFactory):
 
-    def __init__(self, bup_repo, push=False, pull=False):
-        self.bup_repo = bup_repo
+    def __init__(self, push=False, pull=False):
         self.push = push
         self.pull = pull
 
     def buildProtocol(self, addr):
-        p = ContentServerProtocol(self.bup_repo, self.push, self.pull)
+        p = ContentServerProtocol(self.push, self.pull)
         p.factory = self
         return p
 
@@ -225,11 +230,16 @@ port=   port to listen to
     if not (opt.repo or opt.port):
         o.fatal("You must give a repo and a local port")
 
-    serverFactory = ContentServerFactory(opt.repo, opt.push, opt.pull)
+    serverFactory = ContentServerFactory(opt.push, opt.pull)
     reactor.listenTCP(opt.port, serverFactory)
 
     if opt.remote_host and opt.remote_port:
         reactor.connectTCP(opt.remote_host, opt.remote_port, serverFactory)
+
+    global packList
+    git.check_repo_or_die(opt.repo)
+    packList = git.PackIdxList(os.path.join(opt.repo, "objects/pack"))
+    packList.refresh()
 
     log("Starting reactor...\n")
     reactor.run()
