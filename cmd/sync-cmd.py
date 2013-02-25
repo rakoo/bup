@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 import re, struct, errno, time, zlib, sys, time
 from bup import git, ssh, options
 from bup.helpers import *
