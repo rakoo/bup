@@ -51,9 +51,12 @@ class ContentServerProtocol(Int32StringReceiver):
             allrefs = []
             for (refname, sha) in git.list_refs():
                 allrefs.append(refname + ' ' + sha)
-            message = 'REFS\n' + '\n'.join(allrefs)
-            message = struct.pack("!I", len(message)) + message + '\0'
-            self.sendString(message)
+            if len(allrefs) > 1:
+                message = 'REFS\n' + '\n'.join(allrefs)
+                message = struct.pack("!I", len(message)) + message + '\0'
+                self.sendString(message)
+            else:
+                log("No refs to send !\n")
         else:
             log("Received a connection, not pushing\n")
 
