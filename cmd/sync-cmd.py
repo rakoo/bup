@@ -10,13 +10,11 @@ from collections import deque
 
 MAX_FRAME_SIZE = 40000
 
+
 class ContentServerProtocol(Int32StringReceiver):
 
     def __init__(self, push, pull):
         self.MAX_LENGTH = 300000 # some chunks are very large
-
-        self.local_missing = deque()
-        self.remote_missing = deque()
 
         self.total_size_sent = 0
         self.total_size_received = 0
@@ -35,6 +33,14 @@ class ContentServerProtocol(Int32StringReceiver):
         global packList
         self.w = git.PackWriter(objcache_maker = lambda : packList)
 
+        # All the new hashes missing on our side. Used for clean
+        # verification at the end.
+        self.new_hashes = set()
+
+        # When the transfer is done, the other side might still be
+        # sending some data while we verify on our side. This boolean
+        # will skip any processing on our side.
+        self.transfer_done = False
 
     def connectionMade(self):
         if self.push:
@@ -51,13 +57,17 @@ class ContentServerProtocol(Int32StringReceiver):
             log("Received a connection, not pushing\n")
 
     def stringReceived(self, data):
-        self._process_data(data)
-        for next_messages in self._prepare_next_messages():
+        if self.transfer_done:
+            return
+        local_missing, remote_missing = self._process_data(data)
+        for next_messages in self._prepare_next_messages(local_missing,
+                                                        remote_missing):
             if len(next_messages) > 0:
                 tosend = ''.join(next_messages)
                 self.sendString(tosend)
 
     def _process_data(self, data):
+        local_missing = remote_missing = deque()
         for cmd, message in self._decode(data):
             if cmd == 'REFS':
                 if not self.pull:
@@ -69,27 +79,33 @@ class ContentServerProtocol(Int32StringReceiver):
                 if len(missing) == 0:
                     self._end()
                 else:
-                    self.local_missing.extend(missing)
+                    self.new_hashes.update(missing)
+                    local_missing.extend(missing)
 
             elif cmd == 'HAVE':
+                self.total_received += 1
                 if not self.pull:
                     continue
 
                 hash, type, content = self._decode_have(message)
 
                 assert type in ('blob', 'tree', 'commit')
-                #self.w.maybe_write(type, content)
+                assert(self.w.maybe_write(type, content))
+
+                self.new_hashes.remove(hash)
 
                 if type == 'commit':
                     # firstline of the commit message contains the tree
                     tree_sha = content.split('\n')[0].split(' ')[1].decode('hex')
-                    if not self.packList.exists(tree_sha):
-                        self.local_missing.append(tree_sha)
+                    if not self.w.exists(tree_sha) and not tree_sha in self.new_hashes:
+                        self.new_hashes.add(tree_sha)
+                        local_missing.append(tree_sha)
                 elif type == 'tree':
                     # each line contains an object
-                    for (mode, name, hash) in git.tree_decode(content):
-                        if not self.packList.exists(hash):
-                            self.local_missing.append(hash)
+                    for (mode, name, sub_hash) in git.tree_decode(content):
+                        if not self.w.exists(sub_hash) and not sub_hash in self.new_hashes:
+                            self.new_hashes.add(sub_hash)
+                            local_missing.append(sub_hash)
 
                 elif type == 'blob':
                     pass
@@ -97,13 +113,14 @@ class ContentServerProtocol(Int32StringReceiver):
 
             elif cmd == 'WANT':
                 if self.push:
-                    self.remote_missing.append(message)
+                    remote_missing.append(message)
 
+        return local_missing, remote_missing
 
-    def _prepare_next_messages(self):
+    def _prepare_next_messages(self, local_missing, remote_missing):
 
-        if len(self.local_missing) == 0 and len(self.remote_missing) == 0: # transfer is over
-            self.packList.refresh()
+        if len(self.new_hashes) == 0: # transfer is over
+            #log("transfer should be over, sending a REFS to verify...\n")
             allrefs = []
             for (refname, sha) in git.list_refs():
                 allrefs.append(refname + ' ' + sha)
@@ -111,25 +128,25 @@ class ContentServerProtocol(Int32StringReceiver):
             message = struct.pack("!I", len(message)) + message + '\0'
 
             yield [message]
-            
-        while len(self.local_missing) > 0 or len(self.remote_missing) > 0:
+
+        while len(local_missing) > 0 or len(remote_missing) > 0:
             next_messages = []
             total_size = 0
 
-            while len(self.local_missing) > 0:
-                maybe_next = self.local_missing[0]
+            while len(local_missing) > 0:
+                maybe_next = local_missing[0]
                 message = 'WANT %s' % maybe_next
                 message = struct.pack("!I", len(message)) + message + '\0'
 
                 if total_size + len(message) < MAX_FRAME_SIZE:
-                    self.local_missing.popleft()
+                    local_missing.popleft()
                     total_size += len(message)
                     next_messages.append(message)
                 else:
                     break
 
-            while len(self.remote_missing) > 0:
-                maybe_next_sha = self.remote_missing[0]
+            while len(remote_missing) > 0:
+                maybe_next_sha = remote_missing[0]
                 file = self.cp.get(maybe_next_sha.encode('hex'))
                 type = file.next()
                 content = ''.join(part for part in file)
@@ -137,7 +154,7 @@ class ContentServerProtocol(Int32StringReceiver):
                 message = struct.pack("!I", len(message)) + message + '\0'
 
                 if total_size + len(message) < MAX_FRAME_SIZE or len(next_messages) == 0:
-                    self.remote_missing.popleft()
+                    remote_missing.popleft()
                     next_messages.append(message)
                     total_size += len(message)
                 else:
