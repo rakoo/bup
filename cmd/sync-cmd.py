@@ -172,7 +172,7 @@ class ContentServerProtocol(Int32StringReceiver):
 
     def _prepare_next_messages(self, local_missing, remote_missing):
 
-        if len(local_missing) == 0 and len(remote_missing) == 0: # transfer is over
+        if self.total_received == len(self.new_hashes): # transfer is over
             #log("transfer should be over, sending a REFS to verify...\n")
             allrefs = []
             for (refname, sha) in git.list_refs():
