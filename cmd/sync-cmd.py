@@ -152,14 +152,16 @@ class ContentServerProtocol(Int32StringReceiver):
         hashes not yet received and the hashes received in the
         exchange
         """
-        if self.w.exists(hash) or hash in self.new_hashes:
+        if self.packList.exists(hash)\
+           or hash in self.new_hashes\
+           or self.w.exists(hash):
             return False
         else:
             return True
 
     def _prepare_next_messages(self, local_missing, remote_missing):
 
-        if len(self.new_hashes) == 0: # transfer is over
+        if len(local_missing) == 0 and len(remote_missing) == 0: # transfer is over
             #log("transfer should be over, sending a REFS to verify...\n")
             allrefs = []
             for (refname, sha) in git.list_refs():
@@ -250,8 +252,10 @@ class ContentServerProtocol(Int32StringReceiver):
 
     def _end(self, allrefs):
         tmp_set = set(self.new_hashes)
-        for sha in self.w.idx:
-            tmp_set.remove(sha)
+        if self.w.idx:
+            for sha in self.w.idx:
+                tmp_set.remove(sha)
+        print len(tmp_set)
         assert len(tmp_set) == 0
         self.new_hashes.clear
         self.transfer_done = True
