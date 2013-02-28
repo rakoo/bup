@@ -77,7 +77,8 @@ class ContentServerProtocol(Int32StringReceiver):
                 self.sendString(tosend)
 
     def _process_data(self, data):
-        local_missing = remote_missing = deque()
+        local_missing = deque()
+        remote_missing = deque()
         for cmd, message in self._decode(data):
             if cmd == 'REFS':
                 if not self.pull:
@@ -87,7 +88,7 @@ class ContentServerProtocol(Int32StringReceiver):
                 print "missing %s commits" % len(missing)
 
                 if len(missing) == 0:
-                    self._end(_decode_refs(message))
+                    self._end(self._decode_refs(message))
                 else:
                     self.new_commits.extend(missing)
                     self.new_hashes.update(missing)
@@ -190,14 +191,14 @@ class ContentServerProtocol(Int32StringReceiver):
     def _treat_refs(self, data):
 
         missing = []
-        for (name, sha) in _decode_refs(data):
-            if _want_object_or_not(sha):
+        for (name, sha) in self._decode_refs(data):
+            if self._want_object_or_not(sha):
                 missing.append(sha)
         return missing
 
     def _decode_refs(self, refs_message):
         allrefs = []
-        for line in data.split('\n'):
+        for line in refs_message.split('\n'):
             allrefs.append(line.split(' ')) # (name, sha)
 
         return allrefs
