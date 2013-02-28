@@ -14,7 +14,7 @@ MAX_FRAME_SIZE = 40000
 
 class ContentServerProtocol(Int32StringReceiver):
 
-    def __init__(self, push, pull):
+    def __init__(self, repo, push, pull):
         self.MAX_LENGTH = 300000 # some chunks are very large
 
         self.total_size_sent = 0
@@ -31,8 +31,7 @@ class ContentServerProtocol(Int32StringReceiver):
         # objects
         self.pull = pull
 
-        global packList
-        self.w = git.PackWriter(objcache_maker = lambda : packList)
+        self.w = git.PackWriter()
 
         # All the new hashes missing on our side. Used for clean
         # verification at the end.
@@ -42,6 +41,13 @@ class ContentServerProtocol(Int32StringReceiver):
         # sending some data while we verify on our side. This boolean
         # will skip any processing on our side.
         self.transfer_done = False
+
+        git.check_repo_or_die(repo)
+        self.packList = git.PackIdxList(os.path.join(repo, "objects/pack"))
+        self.packList.refresh()
+
+        self.new_commits = []
+
 
     def connectionMade(self):
         if self.push:
@@ -81,8 +87,9 @@ class ContentServerProtocol(Int32StringReceiver):
                 print "missing %s commits" % len(missing)
 
                 if len(missing) == 0:
-                    self._end()
+                    self._end(_decode_refs(message))
                 else:
+                    self.new_commits.extend(missing)
                     self.new_hashes.update(missing)
                     local_missing.extend(missing)
 
@@ -101,13 +108,13 @@ class ContentServerProtocol(Int32StringReceiver):
                 if type == 'commit':
                     # firstline of the commit message contains the tree
                     tree_sha = content.split('\n')[0].split(' ')[1].decode('hex')
-                    if not self.w.exists(tree_sha) and not tree_sha in self.new_hashes:
+                    if _want_object_or_not(tree_sha):
                         self.new_hashes.add(tree_sha)
                         local_missing.append(tree_sha)
                 elif type == 'tree':
                     # each line contains an object
                     for (mode, name, sub_hash) in git.tree_decode(content):
-                        if not self.w.exists(sub_hash) and not sub_hash in self.new_hashes:
+                        if _want_object_or_not(sub_hash):
                             self.new_hashes.add(sub_hash)
                             local_missing.append(sub_hash)
 
@@ -120,6 +127,16 @@ class ContentServerProtocol(Int32StringReceiver):
                     remote_missing.append(message)
 
         return local_missing, remote_missing
+
+    def _want_object_or_not(self, hash):
+        """Tell if an object is needed or not. Checks in the repo, the
+        hashes not yet received and the hashes received in the
+        exchange
+        """
+        if self.w.exists(hash) or hash in self.new_hashes:
+            return False
+        else:
+            return True
 
     def _prepare_next_messages(self, local_missing, remote_missing):
 
@@ -173,14 +190,19 @@ class ContentServerProtocol(Int32StringReceiver):
             yield next_messages
 
     def _treat_refs(self, data):
-        global packList
 
         missing = []
-        for line in data.split('\n'):
-            (name, sha) = line.split(' ')
-            if not packList.exists(sha):
+        for (name, sha) in _decode_refs(data):
+            if _want_object_or_not(sha):
                 missing.append(sha)
         return missing
+
+    def _decode_refs(self, refs_message):
+        allrefs = []
+        for line in data.split('\n'):
+            allrefs.append(line.split(' ')) # (name, sha)
+
+        return allrefs
 
     def _decode_have(self, message):
         hash, rem = message[:20], message[21:]
@@ -216,12 +238,13 @@ class ContentServerProtocol(Int32StringReceiver):
 
 class ContentServerFactory(ClientFactory):
 
-    def __init__(self, push=False, pull=False):
+    def __init__(self, bup_repo, push=False, pull=False):
         self.push = push
         self.pull = pull
+        self.bup_repo = bup_repo
 
     def buildProtocol(self, addr):
-        p = ContentServerProtocol(self.push, self.pull)
+        p = ContentServerProtocol(self.bup_repo, self.push, self.pull)
         p.factory = self
         return p
 
@@ -250,16 +273,11 @@ port=   port to listen to
     if not (opt.repo or opt.port):
         o.fatal("You must give a repo and a local port")
 
-    serverFactory = ContentServerFactory(opt.push, opt.pull)
+    serverFactory = ContentServerFactory(opt.repo, opt.push, opt.pull)
     reactor.listenTCP(opt.port, serverFactory)
 
     if opt.remote_host and opt.remote_port:
         reactor.connectTCP(opt.remote_host, opt.remote_port, serverFactory)
-
-    global packList
-    git.check_repo_or_die(opt.repo)
-    packList = git.PackIdxList(os.path.join(opt.repo, "objects/pack"))
-    packList.refresh()
 
     log("Starting reactor...\n")
     reactor.run()
