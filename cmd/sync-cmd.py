@@ -103,8 +103,6 @@ class ContentServerProtocol(Int32StringReceiver):
                 assert type in ('blob', 'tree', 'commit')
                 assert(self.w.maybe_write(type, content))
 
-                self.new_hashes.remove(hash)
-
                 if type == 'commit':
                     # firstline of the commit message contains the tree
                     tree_sha = content.split('\n')[0].split(' ')[1].decode('hex')
@@ -229,8 +227,12 @@ class ContentServerProtocol(Int32StringReceiver):
 
             start = end+1
 
-    def _end(self):
-        assert len(self.new_hashes) == 0
+    def _end(self, allrefs):
+        tmp_set = set(self.new_hashes)
+        for sha in self.w.idx:
+            tmp_set.remove(sha)
+        assert len(tmp_set) == 0
+        self.new_hashes.clear
         self.transfer_done = True
         log("writing tmp pack to repo...\n")
         self.w.close(run_midx=False)
