@@ -68,6 +68,17 @@ class ContentServerProtocol(Int32StringReceiver):
 
         self.new_commits = []
 
+    def __del__(self):
+        """close the object in charge of the communication with the
+        client. We have to make sure the pack isn't written in the
+        repo.
+
+        This method should never be called manually, only when the line
+        is closed (ie after the pack is cleanly appended to the repo) or
+        when there is an error.
+        """
+        self.w.abort()
+
 
     def connectionMade(self):
         if self.push:
