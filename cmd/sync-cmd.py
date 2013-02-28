@@ -138,13 +138,13 @@ class ContentServerProtocol(Int32StringReceiver):
                 if type == 'commit':
                     # firstline of the commit message contains the tree
                     tree_sha = content.split('\n')[0].split(' ')[1].decode('hex')
-                    if _want_object_or_not(tree_sha):
+                    if self._want_object_or_not(tree_sha):
                         self.new_hashes.add(tree_sha)
                         local_missing.append(tree_sha)
                 elif type == 'tree':
                     # each line contains an object
                     for (mode, name, sub_hash) in git.tree_decode(content):
-                        if _want_object_or_not(sub_hash):
+                        if self._want_object_or_not(sub_hash):
                             self.new_hashes.add(sub_hash)
                             local_missing.append(sub_hash)
 
