@@ -11,6 +11,26 @@ from collections import deque
 
 MAX_FRAME_SIZE = 40000
 
+class SimpleHashList:
+    """A class to hold a list of shas and answer to the #exists method.
+    Used for the new packwriter objcache, because we don't want to mix
+    it with the repo one (since it can be interrupted, thus invalidated,
+    at any time
+    """
+
+    def __init__(self):
+        self.set = set()
+
+    def __iter__(self):
+        return iter(self.set)
+
+    def add(self, sha):
+        self.set.add(sha)
+    def exists(self, sha, want_source=False):
+        return sha in self.set
+
+def _get_simple_objcache():
+    return SimpleHashList()
 
 class ContentServerProtocol(Int32StringReceiver):
 
@@ -31,7 +51,7 @@ class ContentServerProtocol(Int32StringReceiver):
         # objects
         self.pull = pull
 
-        self.w = git.PackWriter()
+        self.w = git.PackWriter(objcache_maker=_get_simple_objcache)
 
         # All the new hashes missing on our side. Used for clean
         # verification at the end.
