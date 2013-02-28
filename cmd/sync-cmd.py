@@ -57,7 +57,7 @@ class ContentServerProtocol(Int32StringReceiver):
             allrefs = []
             for (refname, sha) in git.list_refs():
                 allrefs.append(refname + ' ' + sha)
-            if len(allrefs) > 1:
+            if len(allrefs) > 0:
                 message = 'REFS\n' + '\n'.join(allrefs)
                 message = struct.pack("!I", len(message)) + message + '\0'
                 self.sendString(message)
