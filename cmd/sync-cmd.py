@@ -262,11 +262,16 @@ class ContentServerProtocol(Int32StringReceiver):
             start = end+1
 
     def _end(self, allrefs):
-        tmp_set = set(self.new_hashes)
+        """Do all the cleaning operations. First step is to verify that
+        we have all the chunks we were missing. We then properly close
+        the packwriter, adding its data to the repo.
+        """
+
+        tmp_set = self.new_hashes.copy()
         if self.w.idx:
-            for sha in self.w.idx:
-                tmp_set.remove(sha)
-        print len(tmp_set)
+            for fanout in self.w.idx:
+                for (sha, _crc, _file_size) in fanout:
+                    tmp_set.remove(sha)
         assert len(tmp_set) == 0
         self.new_hashes.clear
         self.transfer_done = True
