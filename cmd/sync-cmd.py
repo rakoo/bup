@@ -190,8 +190,8 @@ class ContentServerProtocol(Int32StringReceiver):
                     if self.validator.is_over():
                         self._end(self._decode_refs(message))
                     else:
-                        self.new_commits.extend(missing)
-                        local_missing.extend(missing)
+                        self.new_commits.extend(missing_here)
+                        local_missing.extend(missing_here)
 
                 if self.push:
                     self.transport.loseConnection()
@@ -301,11 +301,15 @@ class ContentServerProtocol(Int32StringReceiver):
 
     def _treat_refs(self, data):
 
-        allremotes = set(self._decode_refs(data))
-        alllocal = set(git.list_refs)
+        allremotes = set()
+        alllocal = set()
+        for (remote_name, remote_sha) in self._decode_refs(data):
+            allremotes.add(remote_sha)
+        for (name, sha) in git.list_refs():
+            alllocal.add(sha)
 
         missing_here = allremotes - alllocal
-        missing_there = alllocal - allremote
+        missing_there = alllocal - allremotes
 
         return missing_here, missing_there
 
