@@ -85,6 +85,7 @@ class TransferValidator():
             else:
                 del self.parent_to_children[hash]
 
+        # Then take care of its parent
         if hash in self.children_to_parent:
             parent = self.children_to_parent[hash]
             self.parent_to_children[parent].remove(hash)
@@ -182,17 +183,18 @@ class ContentServerProtocol(Int32StringReceiver):
         remote_missing = deque()
         for cmd, message in self._decode(data):
             if cmd == 'REFS':
-                if not self.pull:
-                    continue
 
-                missing = self._treat_refs(message)
-                print "missing %s commits" % len(missing)
+                missing_here, missing_there = self._treat_refs(message)
 
-                if len(missing) == 0 and self.validator.is_over():
-                    self._end(self._decode_refs(message))
-                else:
-                    self.new_commits.extend(missing)
-                    local_missing.extend(missing)
+                if self.pull:
+                    if self.validator.is_over():
+                        self._end(self._decode_refs(message))
+                    else:
+                        self.new_commits.extend(missing)
+                        local_missing.extend(missing)
+
+                if self.push:
+                    self.transport.loseConnection()
 
             elif cmd == 'HAVE':
                 self.total_received += 1
@@ -251,6 +253,8 @@ class ContentServerProtocol(Int32StringReceiver):
             allrefs = []
             for (refname, sha) in git.list_refs():
                 allrefs.append(refname + ' ' + sha)
+            for new_sha in self.new_commits:
+                allrefs.append("newref" + ' ' + new_sha)
             message = 'REFS\n' + '\n'.join(allrefs)
             message = struct.pack("!I", len(message)) + message + '\0'
 
@@ -297,11 +301,13 @@ class ContentServerProtocol(Int32StringReceiver):
 
     def _treat_refs(self, data):
 
-        missing = []
-        for (name, sha) in self._decode_refs(data):
-            if self._want_object_or_not(sha):
-                missing.append(sha)
-        return missing
+        allremotes = set(self._decode_refs(data))
+        alllocal = set(git.list_refs)
+
+        missing_here = allremotes - alllocal
+        missing_there = alllocal - allremote
+
+        return missing_here, missing_there
 
     def _decode_refs(self, refs_message):
         allrefs = []
@@ -335,7 +341,7 @@ class ContentServerProtocol(Int32StringReceiver):
 
             start = end+1
 
-    def _end(self, allrefs):
+    def _end(self, allnewrefs):
         """Do all the cleaning operations. First step is to verify that
         we have all the chunks we were missing. We then properly close
         the packwriter, adding its data to the repo.
