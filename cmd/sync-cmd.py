@@ -15,7 +15,7 @@ class SimpleHashList:
     """A class to hold a list of shas and answer to the #exists method.
     Used for the new packwriter objcache, because we don't want to mix
     it with the repo one (since it can be interrupted, thus invalidated,
-    at any time
+    at any time.
     """
 
     def __init__(self):
@@ -26,11 +26,83 @@ class SimpleHashList:
 
     def add(self, sha):
         self.set.add(sha)
+
     def exists(self, sha, want_source=False):
         return sha in self.set
 
 def _get_simple_objcache():
     return SimpleHashList()
+
+class TransferValidator():
+    """A class to validate the transfer while it is ongoing, instead of
+    waiting for it to end.
+
+    The protocol exchanges information top-down, with a parent being
+    totally defined by its children. This class offers a way to validate
+    a parent as soon as the last of its children arrives. The end of the
+    transfer happens when the root is validated.
+    """
+
+    def __init__(self):
+
+        # A dict with the parents as keys, and the children as values.
+        # Filled when a new chunk is claimed, unfilled when this chunk
+        # is received.
+        # When the transfer is over, it should be empty.
+        self.parent_to_children = {}
+
+        # A dict with a children as a key and its parent as a value.
+        # Filled when a new chunk is claimed, unfilled when this chunk
+        # is received.
+        # When the transfer is over, it should be empty.
+        self.children_to_parent = {}
+
+        self.commits = set()
+
+        self.validated = False
+
+    def tree_claimed(self, commit_hash, tree_hash):
+        self.commits.add(commit_hash)
+        self._object_claimed(commit_hash, tree_hash)
+
+    def tree_object_claimed(self, tree_hash, object_hash):
+        self._object_claimed(tree_hash, object_hash)
+
+    def _object_claimed(self, parent_hash, children_hash):
+
+        if not parent_hash in self.parent_to_children:
+            self.parent_to_children[parent_hash] = set()
+        self.parent_to_children[parent_hash].add(children_hash)
+
+        self.children_to_parent[children_hash] = parent_hash
+
+    def hash_received(self, hash):
+
+        # First verify that there are no children anymore
+        if hash in self.parent_to_children:
+            if len(self.parent_to_children[hash]) > 0:
+                return
+            else:
+                del self.parent_to_children[hash]
+
+        if hash in self.children_to_parent:
+            parent = self.children_to_parent[hash]
+            self.parent_to_children[parent].remove(hash)
+            del self.children_to_parent[hash]
+
+            # try to validate the parent if possible
+            self.hash_received(parent)
+
+        elif hash in self.commits:
+            self.commits.remove(hash)
+            if len(self.commits) == 0:
+                self.validated = True
+
+    def is_over(self):
+        return self.validated
+
+    def is_claimed(self, hash):
+        return hash in self.children_to_parent
 
 class ContentServerProtocol(Int32StringReceiver):
 
@@ -53,10 +125,6 @@ class ContentServerProtocol(Int32StringReceiver):
 
         self.w = git.PackWriter(objcache_maker=_get_simple_objcache)
 
-        # All the new hashes missing on our side. Used for clean
-        # verification at the end.
-        self.new_hashes = set()
-
         # When the transfer is done, the other side might still be
         # sending some data while we verify on our side. This boolean
         # will skip any processing on our side.
@@ -67,6 +135,8 @@ class ContentServerProtocol(Int32StringReceiver):
         self.packList.refresh()
 
         self.new_commits = []
+
+        self.validator = TransferValidator()
 
     def __del__(self):
         """close the object in charge of the communication with the
@@ -118,11 +188,10 @@ class ContentServerProtocol(Int32StringReceiver):
                 missing = self._treat_refs(message)
                 print "missing %s commits" % len(missing)
 
-                if len(missing) == 0:
+                if len(missing) == 0 and self.validator.is_over():
                     self._end(self._decode_refs(message))
                 else:
                     self.new_commits.extend(missing)
-                    self.new_hashes.update(missing)
                     local_missing.extend(missing)
 
             elif cmd == 'HAVE':
@@ -133,23 +202,25 @@ class ContentServerProtocol(Int32StringReceiver):
                 hash, type, content = self._decode_have(message)
 
                 assert type in ('blob', 'tree', 'commit')
-                assert(self.w.maybe_write(type, content))
+                self._write_chunk(type, hash, content)
 
                 if type == 'commit':
                     # firstline of the commit message contains the tree
                     tree_sha = content.split('\n')[0].split(' ')[1].decode('hex')
+
                     if self._want_object_or_not(tree_sha):
-                        self.new_hashes.add(tree_sha)
+                        self.validator.tree_claimed(hash, tree_sha)
                         local_missing.append(tree_sha)
+
                 elif type == 'tree':
                     # each line contains an object
                     for (mode, name, sub_hash) in git.tree_decode(content):
                         if self._want_object_or_not(sub_hash):
-                            self.new_hashes.add(sub_hash)
+                            self.validator.tree_object_claimed(hash, sub_hash)
                             local_missing.append(sub_hash)
 
                 elif type == 'blob':
-                    pass
+                    self.validator.hash_received(hash)
                     #print "blob"
 
             elif cmd == 'WANT':
@@ -158,13 +229,17 @@ class ContentServerProtocol(Int32StringReceiver):
 
         return local_missing, remote_missing
 
+    def _write_chunk(self, type, sha, content):
+        """Write content to pack, validating the parent if possible
+        """
+        assert(self.w.maybe_write(type, content))
+
     def _want_object_or_not(self, hash):
-        """Tell if an object is needed or not. Checks in the repo, the
-        hashes not yet received and the hashes received in the
-        exchange
+        """Tell if an object is needed or not. Checks in the repo and
+        the hashes received in the exchange
         """
         if self.packList.exists(hash)\
-           or hash in self.new_hashes\
+           or self.validator.is_claimed(hash)\
            or self.w.exists(hash):
             return False
         else:
@@ -172,8 +247,7 @@ class ContentServerProtocol(Int32StringReceiver):
 
     def _prepare_next_messages(self, local_missing, remote_missing):
 
-        if self.total_received == len(self.new_hashes): # transfer is over
-            #log("transfer should be over, sending a REFS to verify...\n")
+        if self.validator.is_over():
             allrefs = []
             for (refname, sha) in git.list_refs():
                 allrefs.append(refname + ' ' + sha)
@@ -267,13 +341,7 @@ class ContentServerProtocol(Int32StringReceiver):
         the packwriter, adding its data to the repo.
         """
 
-        tmp_set = self.new_hashes.copy()
-        if self.w.idx:
-            for fanout in self.w.idx:
-                for (sha, _crc, _file_size) in fanout:
-                    tmp_set.remove(sha)
-        assert len(tmp_set) == 0
-        self.new_hashes.clear
+        assert(self.validator.is_over())
         self.transfer_done = True
         log("writing tmp pack to repo...\n")
         self.w.close(run_midx=False)
