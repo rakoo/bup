@@ -66,6 +66,11 @@ class TransferValidator():
 
         self.validated = True
 
+    def commits_claimed(self, commit_hashes):
+        for commit in commit_hashes:
+            self.validated = False
+            self.commits.add(commit)
+
     def tree_claimed(self, commit_hash, tree_hash):
         self.commits.add(commit_hash)
         self._object_claimed(commit_hash, tree_hash)
@@ -212,6 +217,7 @@ class ContentServerProtocol(Int32StringReceiver):
                         self._end(self._decode_refs(message))
                     else:
                         self.new_commits.extend(missing_here)
+                        self.validator.commits_claimed(missing_here)
                         local_missing.extend(missing_here)
 
                 if self.push:
