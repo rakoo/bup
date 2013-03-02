@@ -12,6 +12,9 @@ from collections import deque
 import re
 
 MAX_FRAME_SIZE = 40000
+CAPABILITIES = set()
+CAPABILITIES.add('PUSH')
+CAPABILITIES.add('PULL')
 
 class SimpleHashList:
     """A class to hold a list of shas and answer to the #exists method.
@@ -142,8 +145,6 @@ class ContentServerProtocol(Int32StringReceiver):
 
         self.validator = TransferValidator()
 
-        self.capabilites = set('PUSH', 'PULL')
-
     def __del__(self):
         """close the object in charge of the communication with the
         client. We have to make sure the pack isn't written in the
@@ -185,7 +186,7 @@ class ContentServerProtocol(Int32StringReceiver):
             if cmd == 'CAPA':
                 stop_ops = False
 
-                remote_capabilities = self._decode_capa(message)
+                remote_capabilities = self._decode_capabilities(message)
                 if self.push and not 'PULL' in remote_capabilities:
                     log("trying to push on a remote that doesn't pull.\n")
                     stop_ops = True
@@ -257,7 +258,7 @@ class ContentServerProtocol(Int32StringReceiver):
         remote_capabilities = set()
 
         for capa in message.split('\n'):
-            if capa in self.capabilites:
+            if capa in CAPABILITIES:
                 remote_capabilities.add(capa)
 
         return remote_capabilities
