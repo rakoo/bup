@@ -215,7 +215,6 @@ class ContentServerProtocol(Int32StringReceiver):
                         local_missing.extend(missing_here)
 
                 if self.push:
-                    print len(missing_there)
                     if len(missing_there) == 0:
                         self.transport.loseConnection()
 
