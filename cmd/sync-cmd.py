@@ -334,8 +334,9 @@ class ContentServerProtocol(Int32StringReceiver):
 
         allremotes = set()
         alllocal = set()
-        for (remote_name, remote_sha) in self._decode_refs(data):
-            allremotes.add(remote_sha)
+        for pair in self._decode_refs(data):
+            if len(pair) == 2:
+                allremotes.add(pair[1])
         for (name, sha) in git.list_refs():
             alllocal.add(sha)
 
