@@ -61,7 +61,7 @@ class TransferValidator():
 
         self.commits = set()
 
-        self.validated = False
+        self.validated = True
 
     def tree_claimed(self, commit_hash, tree_hash):
         self.commits.add(commit_hash)
@@ -71,6 +71,7 @@ class TransferValidator():
         self._object_claimed(tree_hash, object_hash)
 
     def _object_claimed(self, parent_hash, children_hash):
+        self.validated = False
 
         if not parent_hash in self.parent_to_children:
             self.parent_to_children[parent_hash] = set()
@@ -141,6 +142,8 @@ class ContentServerProtocol(Int32StringReceiver):
 
         self.validator = TransferValidator()
 
+        self.capabilites = set('PUSH', 'PULL')
+
     def __del__(self):
         """close the object in charge of the communication with the
         client. We have to make sure the pack isn't written in the
@@ -154,21 +157,16 @@ class ContentServerProtocol(Int32StringReceiver):
 
 
     def connectionMade(self):
+        log("Received a connection, sending capabilities\n")
+        capabilities = set()
         if self.push:
-            # Upon receiving a connection, send the refs
+            capabilities.add('PUSH')
+        if self.pull:
+            capabilities.add('PULL')
 
-            log("Received a connection, starting push\n")
-            allrefs = []
-            for (refname, sha) in git.list_refs():
-                allrefs.append(refname + ' ' + sha)
-            if len(allrefs) > 0:
-                message = 'REFS\n' + '\n'.join(allrefs)
-                message = struct.pack("!I", len(message)) + message + '\0'
-                self.sendString(message)
-            else:
-                log("No refs to send !\n")
-        else:
-            log("Received a connection, not pushing\n")
+        message = 'CAPA\n' + '\n'.join(capabilities)
+        message = struct.pack("!I", len(message)) + message + '\0'
+        self.sendString(message)
 
     def stringReceived(self, data):
         if self.transfer_done:
@@ -184,7 +182,27 @@ class ContentServerProtocol(Int32StringReceiver):
         local_missing = deque()
         remote_missing = deque()
         for cmd, message in self._decode(data):
-            if cmd == 'REFS':
+            if cmd == 'CAPA':
+                stop_ops = False
+
+                remote_capabilities = self._decode_capa(message)
+                if self.push and not 'PULL' in remote_capabilities:
+                    log("trying to push on a remote that doesn't pull.\n")
+                    stop_ops = True
+                if self.pull and not 'PUSH' in remote_capabilities:
+                    log("trying to pull on a remote that doesn't push.\n")
+                    stop_ops = True
+
+                if not stop_ops:
+                    allrefs = []
+                    for (refname, sha) in git.list_refs():
+                        allrefs.append(refname + ' ' + sha)
+                    if len(allrefs) > 0:
+                        message = 'REFS\n' + '\n'.join(allrefs)
+                        message = struct.pack("!I", len(message)) + message + '\0'
+                        self.sendString(message)
+
+            elif cmd == 'REFS':
 
                 missing_here, missing_there = self._treat_refs(message)
 
@@ -196,7 +214,9 @@ class ContentServerProtocol(Int32StringReceiver):
                         local_missing.extend(missing_here)
 
                 if self.push:
-                    self.transport.loseConnection()
+                    print len(missing_there)
+                    if len(missing_there) == 0:
+                        self.transport.loseConnection()
 
             elif cmd == 'HAVE':
                 self.total_received += 1
@@ -232,6 +252,15 @@ class ContentServerProtocol(Int32StringReceiver):
                     remote_missing.append(message)
 
         return local_missing, remote_missing
+
+    def _decode_capabilities(self, message):
+        remote_capabilities = set()
+
+        for capa in message.split('\n'):
+            if capa in self.capabilites:
+                remote_capabilities.add(capa)
+
+        return remote_capabilities
 
     def _write_chunk(self, type, sha, content):
         """Write content to pack, validating the parent if possible
