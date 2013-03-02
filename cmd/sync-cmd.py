@@ -213,7 +213,7 @@ class ContentServerProtocol(Int32StringReceiver):
                 missing_here, missing_there = self._treat_refs(message)
 
                 if self.pull:
-                    if self.validator.is_over():
+                    if self.validator.is_over() and self._have_new_commits(missing_here):
                         self._end(self._decode_refs(message))
                     else:
                         self.new_commits.extend(missing_here)
@@ -258,6 +258,20 @@ class ContentServerProtocol(Int32StringReceiver):
                     remote_missing.append(message)
 
         return local_missing, remote_missing
+
+    def _have_new_commits(self, commits):
+        """Given a list of commits, tell if we have them. This is used
+        at the end of a transfer, where the new commits aren't in the
+        repo but are in the new pack(s).
+        """
+        have_commits = True
+
+        for commit in commits:
+            if not self.w.exists(commit):
+                have_commits = False
+                break
+
+        return have_commits
 
     def _decode_capabilities(self, message):
         remote_capabilities = set()
