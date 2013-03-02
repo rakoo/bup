@@ -385,23 +385,33 @@ class ContentServerProtocol(Int32StringReceiver):
 
         assert(self.validator.is_over())
         self.transfer_done = True
-        log("writing tmp pack to repo...\n")
 
-        self.w.close(run_midx=False)
+        if self.w.idx is not None and len(self.w.idx) > 0:
+            log("writing tmp pack to repo...\n")
 
-        log("updating refs...\n")
-        sum = Sha1(self.transport.getHost().host)
-        sum.update(str(self.transport.getHost().port))
-        remote_id = sum.digest().encode('hex')
+            self.w.close(run_midx=False)
 
-        for (ref_name, sha) in allnewrefs:
-            # strip refs/heads from the ref name
-            ref_simple_name = re.sub("refs/heads/", '', ref_name)
+            log("updating refs...\n")
+            sum = Sha1(self.transport.getHost().host)
+            sum.update(str(self.transport.getHost().port))
+            remote_id = sum.digest().encode('hex')
 
-            name = 'refs/heads/%s-%s' % (remote_id, ref_simple_name)
-            git.update_ref(name, sha, None)
+            for (new_refname, sha) in allnewrefs:
+                # strip refs/heads from the ref name
+                ref_simple_name = re.sub("refs/heads/", '', new_refname)
+                name = 'refs/heads/%s-%s' % (remote_id, ref_simple_name)
 
-        log("wrote to repo, have a nice day!\n")
+                old_sha = None
+                for (refname, sha) in git.list_refs():
+                    if new_refname == refname:
+                        old_sha = sha
+
+                git.update_ref(name, sha, old_sha)
+
+            log("wrote to repo, have a nice day!\n")
+        else:
+            self.w.abort()
+            log("no new data, skimming along\n")
 
 class ContentServerFactory(ClientFactory):
 
