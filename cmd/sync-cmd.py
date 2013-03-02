@@ -232,7 +232,7 @@ class ContentServerProtocol(Int32StringReceiver):
                 hash, type, content = self._decode_have(message)
 
                 assert type in ('blob', 'tree', 'commit')
-                self._write_chunk(type, hash, content)
+                assert(self.w.maybe_write(type, content))
 
                 if type == 'commit':
                     # firstline of the commit message contains the tree
@@ -281,11 +281,6 @@ class ContentServerProtocol(Int32StringReceiver):
                 remote_capabilities.add(capa)
 
         return remote_capabilities
-
-    def _write_chunk(self, type, sha, content):
-        """Write content to pack, validating the parent if possible
-        """
-        assert(self.w.maybe_write(type, content))
 
     def _want_object_or_not(self, hash):
         """Tell if an object is needed or not. Checks in the repo and
@@ -375,11 +370,12 @@ class ContentServerProtocol(Int32StringReceiver):
     def _decode_have(self, message):
         hash, rem = message[:20], message[21:]
         type = ''
+        char_pointer = 0
         while type not in ('commit', 'tree', 'blob'):
-            type += rem[0]
-            rem = rem[1:]
-        rem = rem[1:] # discard the '\n'
-        return hash, type, rem
+            type += rem[char_pointer]
+            char_pointer += 1
+        char_pointer += 1 # discard the '\n'
+        return hash, type, rem[char_pointer:]
 
     def _decode(self, buf):
         """yield each framed message in the raw datagram received"""
