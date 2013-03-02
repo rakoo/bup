@@ -9,6 +9,8 @@ from twisted.internet import reactor
 
 from collections import deque
 
+import re
+
 MAX_FRAME_SIZE = 40000
 
 class SimpleHashList:
@@ -354,7 +356,21 @@ class ContentServerProtocol(Int32StringReceiver):
         assert(self.validator.is_over())
         self.transfer_done = True
         log("writing tmp pack to repo...\n")
+
         self.w.close(run_midx=False)
+
+        log("updating refs...\n")
+        sum = Sha1(self.transport.getHost().host)
+        sum.update(str(self.transport.getHost().port))
+        remote_id = sum.digest().encode('hex')
+
+        for (ref_name, sha) in allnewrefs:
+            # strip refs/heads from the ref name
+            ref_simple_name = re.sub("refs/heads/", '', ref_name)
+
+            name = 'refs/heads/%s-%s' % (remote_id, ref_simple_name)
+            git.update_ref(name, sha, None)
+
         log("wrote to repo, have a nice day!\n")
 
 class ContentServerFactory(ClientFactory):
