@@ -17,10 +17,10 @@ CAPABILITIES.add('PUSH')
 CAPABILITIES.add('PULL')
 
 class SimpleHashList:
-    """A class to hold a list of shas and answer to the #exists method.
+    """A class to hold a list of shas. It responds to the #exists method.
     Used for the new packwriter objcache, because we don't want to mix
     it with the repo one (since it can be interrupted, thus invalidated,
-    at any time.
+    at any time).
     """
 
     def __init__(self):
@@ -308,16 +308,16 @@ class ContentServerProtocol(Int32StringReceiver):
 
         while len(local_missing) > 0 or len(remote_missing) > 0:
             next_messages = []
-            total_size = 0
+            packet_size = 0
 
             while len(local_missing) > 0:
                 maybe_next = local_missing[0]
                 message = 'WANT %s' % maybe_next
                 message = struct.pack("!I", len(message)) + message + '\0'
 
-                if total_size + len(message) < MAX_FRAME_SIZE:
+                if packet_size + len(message) < MAX_FRAME_SIZE:
                     local_missing.popleft()
-                    total_size += len(message)
+                    packet_size += len(message)
                     next_messages.append(message)
                 else:
                     break
@@ -330,10 +330,10 @@ class ContentServerProtocol(Int32StringReceiver):
                 message = "HAVE %s %s\n%s" % (maybe_next_sha, type, content)
                 message = struct.pack("!I", len(message)) + message + '\0'
 
-                if total_size + len(message) < MAX_FRAME_SIZE or len(next_messages) == 0:
+                if packet_size + len(message) < MAX_FRAME_SIZE or len(next_messages) == 0:
                     remote_missing.popleft()
                     next_messages.append(message)
-                    total_size += len(message)
+                    packet_size += len(message)
                 else:
                     break
 
