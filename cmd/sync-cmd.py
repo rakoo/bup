@@ -116,6 +116,9 @@ class TransferValidator():
     def is_claimed(self, hash):
         return hash in self.children_to_parent
 
+    def left(self):
+        return len(self.children_to_parent)
+
 class ContentServerProtocol(Int32StringReceiver):
 
     def __init__(self, repo, push, pull):
@@ -177,20 +180,33 @@ class ContentServerProtocol(Int32StringReceiver):
     def stringReceived(self, data):
         if self.transfer_done:
             return
+
         local_missing, remote_missing = self._process_data(data)
+
+        size_sent = 0
         for next_messages in self._prepare_next_messages(local_missing,
                                                         remote_missing):
             if len(next_messages) > 0:
                 tosend = ''.join(next_messages)
+                size_sent += len(tosend)
                 self.sendString(tosend)
+
+        self.total_size_received += len(data)
+        self.total_size_sent += size_sent
+        duration = time.time() - self.beginning
+        up_speed = self.total_size_sent / duration / 1024
+        down_speed = self.total_size_received / duration / 1024
+        qprogress("U:%6.2f kbps/D:%6.2f kbps/%6d chunks left\r" % (up_speed,
+                                                       down_speed,
+                                                       self.validator.left()))
 
     def _process_data(self, data):
         local_missing = deque()
         remote_missing = deque()
         for cmd, message in self._decode(data):
             if cmd == 'CAPA':
-                stop_ops = False
 
+                stop_ops = False
                 remote_capabilities = self._decode_capabilities(message)
                 if self.push and not 'PULL' in remote_capabilities:
                     log("trying to push on a remote that doesn't pull.\n")
@@ -336,12 +352,6 @@ class ContentServerProtocol(Int32StringReceiver):
                     packet_size += len(message)
                 else:
                     break
-
-            self.total_size_sent += total_size
-            duration = time.time() - self.beginning
-            speed = self.total_size_sent / (duration) / 1024
-            qprogress("%s kbps\r" % str(speed))
-
 
             yield next_messages
 
