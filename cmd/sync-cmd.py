@@ -392,7 +392,10 @@ class ContentServerProtocol(Int32StringReceiver):
         while type not in ('commit', 'tree', 'blob'):
             type += rem[char_pointer]
             char_pointer += 1
-        char_pointer += 1 # discard the '\n'
+
+        assert rem[char_pointer:char_pointer+1] == '\n'
+        char_pointer += 1
+
         return hash, type, rem[char_pointer:]
 
     def _decode(self, buf):
