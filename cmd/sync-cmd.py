@@ -29,6 +29,9 @@ class SimpleHashList:
     def __iter__(self):
         return iter(self.set)
 
+    def __len__(self):
+        return len(self.set)
+
     def add(self, sha):
         self.set.add(sha)
 
@@ -64,7 +67,7 @@ class TransferValidator():
 
         self.commits = set()
 
-        self.validated = True
+        self.validated = False
 
     def commits_claimed(self, commit_hashes):
         for commit in commit_hashes:
@@ -93,8 +96,6 @@ class TransferValidator():
         if hash in self.parent_to_children:
             if len(self.parent_to_children[hash]) > 0:
                 return
-            else:
-                del self.parent_to_children[hash]
 
         # Then take care of its parent
         if hash in self.children_to_parent:
@@ -107,8 +108,9 @@ class TransferValidator():
 
         elif hash in self.commits:
             self.commits.remove(hash)
-            if len(self.commits) == 0:
-                self.validated = True
+
+        if len(self.commits) == 0 and len(self.children_to_parent) == 0:
+            self.validated = True
 
     def is_over(self):
         return self.validated
@@ -153,6 +155,10 @@ class ContentServerProtocol(Int32StringReceiver):
 
         self.validator = TransferValidator()
 
+        # An array to store the content of the new commits. They are
+        # written at the end of the transfer.
+        self.tmp_commits = []
+
     def __del__(self):
         """close the object in charge of the communication with the
         client. We have to make sure the pack isn't written in the
@@ -163,7 +169,6 @@ class ContentServerProtocol(Int32StringReceiver):
         when there is an error.
         """
         self.w.abort()
-
 
     def connectionMade(self):
         log("Received a connection, sending capabilities\n")
@@ -219,17 +224,20 @@ class ContentServerProtocol(Int32StringReceiver):
                     allrefs = []
                     for (refname, sha) in git.list_refs():
                         allrefs.append(refname + ' ' + sha)
-                    if len(allrefs) > 0:
-                        message = 'REFS\n' + '\n'.join(allrefs)
-                        message = struct.pack("!I", len(message)) + message + '\0'
-                        self.sendString(message)
+
+                    message = 'REFS\n' + '\n'.join(allrefs)
+                    message = struct.pack("!I", len(message)) + message + '\0'
+                    self.sendString(message)
 
             elif cmd == 'REFS':
 
                 missing_here, missing_there = self._treat_refs(message)
 
                 if self.pull:
-                    if self.validator.is_over() and self._have_new_commits(missing_here):
+                    if self.validator.is_over():
+                        for new_commit_content in self.tmp_commits:
+                            assert(self.w.maybe_write('commit',
+                                                      new_commit_content))
                         self._end(self._decode_refs(message))
                     else:
                         self.new_commits.extend(missing_here)
@@ -246,11 +254,11 @@ class ContentServerProtocol(Int32StringReceiver):
                     continue
 
                 hash, type, content = self._decode_have(message)
-
                 assert type in ('blob', 'tree', 'commit')
-                assert(self.w.maybe_write(type, content))
+                self.validator.hash_received(hash)
 
                 if type == 'commit':
+                    self.tmp_commits.append(content)
                     # firstline of the commit message contains the tree
                     tree_sha = content.split('\n')[0].split(' ')[1].decode('hex')
 
@@ -259,6 +267,7 @@ class ContentServerProtocol(Int32StringReceiver):
                         local_missing.append(tree_sha)
 
                 elif type == 'tree':
+                    assert(self.w.maybe_write(type, content))
                     # each line contains an object
                     for (mode, name, sub_hash) in git.tree_decode(content):
                         if self._want_object_or_not(sub_hash):
@@ -266,8 +275,7 @@ class ContentServerProtocol(Int32StringReceiver):
                             local_missing.append(sub_hash)
 
                 elif type == 'blob':
-                    self.validator.hash_received(hash)
-                    #print "blob"
+                    assert(self.w.maybe_write(type, content))
 
             elif cmd == 'WANT':
                 if self.push:
@@ -311,7 +319,7 @@ class ContentServerProtocol(Int32StringReceiver):
 
     def _prepare_next_messages(self, local_missing, remote_missing):
 
-        if self.validator.is_over():
+        if self.validator.is_over() and len(local_missing) == 0 and len(remote_missing) == 0:
             allrefs = []
             for (refname, sha) in git.list_refs():
                 allrefs.append(refname + ' ' + sha)
