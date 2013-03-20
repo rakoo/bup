@@ -221,13 +221,7 @@ class ContentServerProtocol(Int32StringReceiver):
                     stop_ops = True
 
                 if not stop_ops:
-                    allrefs = []
-                    for (refname, sha) in git.list_refs():
-                        allrefs.append(refname + ' ' + sha)
-
-                    message = 'REFS\n' + '\n'.join(allrefs)
-                    message = struct.pack("!I", len(message)) + message + '\0'
-                    self.sendString(message)
+                    self.sendString(self._all_refs_message())
 
             elif cmd == 'REFS':
 
@@ -246,6 +240,7 @@ class ContentServerProtocol(Int32StringReceiver):
 
                 if self.push:
                     if len(missing_there) == 0:
+                        self.sendString(self._all_refs_message())
                         self.transport.loseConnection()
 
             elif cmd == 'HAVE':
@@ -282,6 +277,18 @@ class ContentServerProtocol(Int32StringReceiver):
                     remote_missing.append(message)
 
         return local_missing, remote_missing
+
+    def _all_refs_message(self):
+        """Build a REFS message containing all the refs we have on our
+        side.
+        """
+        allrefs = []
+        for (refname, sha) in git.list_refs():
+            allrefs.append(refname + ' ' + sha)
+
+        message = 'REFS\n' + '\n'.join(allrefs)
+        message = struct.pack("!I", len(message)) + message + '\0'
+        return message
 
     def _have_new_commits(self, commits):
         """Given a list of commits, tell if we have them. This is used
