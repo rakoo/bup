@@ -479,7 +479,7 @@ class ContentServerFactory(ClientFactory):
 def main():
 
     optspec = """
-bup sync [--remote_host host] [--remote_port remote_port] --port port --repo repo
+bup sync [--remote_host host] [--remote_port remote_port] --port port --repo repo [--push] [--pull]
 --
 push    push commits that are not available remotely
 pull    pull commits that are not available locally
