@@ -25,6 +25,21 @@ consider creating an SSH tunnel.
 More documentation on the internals of the protocol is available in the
 SYNC document.
 
+# EXAMPLE
+
+To present a push only peer, accepting every request for data :
+
+  pusher$ bup sync --port 8000 --repo /path/to/repo --push
+
+To connect to that node using a pull only peer :
+
+  puller$ bup sync --port 8000 --repo /path/to/repo --pull --remote_host pusher --remote_port 8000
+
+To present a `dump box` that will accept everything from anyone. Be
+careful of the implications :
+
+  dump-box$ bup sync --port 8000 --repo /path/to/repo --pull
+
 # OPTIONS
 
 --repo */path/to/repo*
